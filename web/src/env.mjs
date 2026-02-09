@@ -216,6 +216,13 @@ export const env = createEnv({
     EMAIL_FROM_ADDRESS: z.string().optional(),
     SMTP_CONNECTION_URL: z.string().optional(),
 
+    // ASSISTANT - LLM Configuration for the chat assistant
+    ASSISTANT_LLM_API_KEY: z.string().optional(),
+    ASSISTANT_LLM_PROVIDER: z.string().default("openai"),
+    ASSISTANT_LLM_MODEL: z.string().default("gpt-4"),
+    ASSISTANT_LLM_ADAPTER: z.string().default("openai"),
+    ASSISTANT_LLM_BASE_URL: z.string().url().optional(),
+
     // Otel
     OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://localhost:4318"),
     OTEL_SERVICE_NAME: z.string().default("web"),
