@@ -4,14 +4,17 @@ import { ScrollArea } from "@/src/components/ui/scroll-area";
 import { Separator } from "@/src/components/ui/separator";
 import { Badge } from "@/src/components/ui/badge";
 import { Skeleton } from "@/src/components/ui/skeleton";
-import { Plus, MessageSquare } from "lucide-react";
+import { Input } from "@/src/components/ui/input";
+import { Plus, MessageSquare, Pencil, Check, X } from "lucide-react";
 import { api } from "@/src/utils/api";
 import { useRouter } from "next/router";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/src/utils/tailwind";
+import { useState } from "react";
 
 type Conversation = {
   id: string;
+  title: string;
   startedAt: Date;
   _count: {
     messages: number;
@@ -35,6 +38,8 @@ export function ConversationList({
 }: ConversationListProps) {
   const router = useRouter();
   const utils = api.useUtils();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
 
   const createConversation = api.assistant.createConversation.useMutation({
     onSuccess: (data) => {
@@ -45,8 +50,38 @@ export function ConversationList({
     },
   });
 
+  const updateConversation = api.assistant.updateConversation.useMutation({
+    onSuccess: () => {
+      // Invalidate and refetch conversations list
+      void utils.assistant.listConversations.invalidate();
+      setEditingId(null);
+    },
+  });
+
   const handleNewConversation = () => {
     createConversation.mutate();
+  };
+
+  const handleStartEdit = (conv: Conversation, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent selecting conversation
+    setEditingId(conv.id);
+    setEditTitle(conv.title);
+  };
+
+  const handleSaveEdit = (conversationId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (editTitle.trim()) {
+      updateConversation.mutate({
+        conversationId,
+        title: editTitle.trim(),
+      });
+    }
+  };
+
+  const handleCancelEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingId(null);
+    setEditTitle("");
   };
 
   if (isLoading) {
@@ -90,18 +125,65 @@ export function ConversationList({
               <Card
                 key={conversation.id}
                 className={cn(
-                  "cursor-pointer p-3 transition-colors hover:bg-accent",
+                  "group cursor-pointer p-3 transition-colors hover:bg-accent",
                   selectedConversationId === conversation.id &&
                     "border-primary bg-accent",
                 )}
                 onClick={() => onSelectConversation(conversation.id)}
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">Conversation</span>
-                    </div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    {editingId === conversation.id ? (
+                      <div
+                        className="flex items-center gap-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Input
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          className="h-7 text-sm"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              handleSaveEdit(conversation.id, e as any);
+                            } else if (e.key === "Escape") {
+                              handleCancelEdit(e as any);
+                            }
+                          }}
+                        />
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 shrink-0"
+                          onClick={(e) => handleSaveEdit(conversation.id, e)}
+                        >
+                          <Check className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 shrink-0"
+                          onClick={handleCancelEdit}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate text-sm font-medium">
+                          {conversation.title}
+                        </span>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                          onClick={(e) => handleStartEdit(conversation, e)}
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Badge variant="secondary" className="text-xs">
                         {conversation._count.messages} messages

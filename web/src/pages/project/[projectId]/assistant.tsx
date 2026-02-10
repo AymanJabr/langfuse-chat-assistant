@@ -17,7 +17,6 @@ export default function Assistant() {
   const { data: conversations, isLoading } =
     api.assistant.listConversations.useQuery(undefined, {
       enabled: !!projectId,
-      refetchInterval: 10000, // Auto-refresh every 10 seconds
     });
 
   return (

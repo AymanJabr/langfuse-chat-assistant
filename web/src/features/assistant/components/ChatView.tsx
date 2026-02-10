@@ -26,17 +26,59 @@ export function ChatView({ conversationId, projectId }: ChatViewProps) {
 
   // Send message mutation
   const sendMessage = api.assistant.sendMessage.useMutation({
-    onMutate: () => {
+    onMutate: async (variables) => {
       setIsWaitingForResponse(true);
+
+      // Cancel any outgoing refetches
+      await utils.assistant.getConversation.cancel({
+        conversationId: variables.conversationId,
+      });
+
+      // Snapshot the previous value
+      const previousConversation = utils.assistant.getConversation.getData({
+        conversationId: variables.conversationId,
+      });
+
+      // Optimistically update to show user message immediately
+      utils.assistant.getConversation.setData(
+        { conversationId: variables.conversationId },
+        (old) => {
+          if (!old) return old;
+          return {
+            ...old,
+            messages: [
+              ...old.messages,
+              {
+                id: `temp-${Date.now()}`,
+                sender: "user",
+                content: variables.content,
+                timestamp: new Date(),
+                metadata: null,
+              },
+            ],
+          };
+        },
+      );
+
+      return { previousConversation };
     },
     onSuccess: () => {
-      // Invalidate conversation to refetch messages
+      // Refetch to get the real messages (including assistant response)
       void utils.assistant.getConversation.invalidate({
         conversationId: conversationId!,
       });
+      // Also invalidate conversation list to update message count
+      void utils.assistant.listConversations.invalidate();
       setIsWaitingForResponse(false);
     },
-    onError: () => {
+    onError: (_error, _variables, context) => {
+      // Rollback optimistic update on error
+      if (context?.previousConversation) {
+        utils.assistant.getConversation.setData(
+          { conversationId: conversationId! },
+          context.previousConversation,
+        );
+      }
       setIsWaitingForResponse(false);
     },
   });
@@ -107,6 +149,7 @@ export function ChatView({ conversationId, projectId }: ChatViewProps) {
                 sender={message.sender as "user" | "assistant"}
                 content={message.content}
                 timestamp={message.timestamp}
+                metadata={message.metadata as any}
               />
             ))
           )}

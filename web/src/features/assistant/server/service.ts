@@ -5,8 +5,11 @@ import {
   instrumentAsync,
   type TraceSinkParams,
   ChatMessageType,
+  ChatMessageRole,
   type ChatMessage,
   LangfuseInternalTraceEnvironment,
+  type LLMToolDefinition,
+  type LLMToolCall,
 } from "@langfuse/shared/src/server";
 import { encrypt } from "@langfuse/shared/encryption";
 import { TRPCError } from "@trpc/server";
@@ -14,6 +17,7 @@ import { env } from "@/src/env.mjs";
 import { SpanKind } from "@opentelemetry/api";
 import { randomBytes } from "crypto";
 import { getLangfuseClient } from "./utils";
+import { searchDocumentation } from "./docs";
 
 interface Message {
   sender: string;
@@ -26,9 +30,58 @@ interface SendMessageParams {
   userId: string;
 }
 
+export type ToolCall = {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+};
+
+export type SendMessageResult = {
+  content: string;
+  toolCalls?: ToolCall[];
+};
+
+// System prompt to establish assistant identity and context
+const SYSTEM_PROMPT = `You are the Langfuse Assistant, an AI helper specifically designed to help users understand and use Langfuse.
+
+Langfuse is an open-source LLM engineering platform for:
+- Tracing LLM applications (capturing all LLM calls, chains, and agents)
+- Managing prompts (versioning, deployment, A/B testing)
+- Evaluating quality (LLM-as-a-Judge, human annotation)
+- Testing with datasets
+- Monitoring costs and performance
+
+When users ask questions:
+1. ALWAYS assume they are asking about Langfuse unless they explicitly mention another tool
+2. Use the search_documentation tool to find relevant information from the Langfuse documentation
+3. Provide clear, step-by-step instructions based on the documentation found
+4. Be concise but thorough
+5. Include specific UI locations when relevant (e.g., "Navigate to Settings → API Keys")
+6. If the documentation search doesn't find relevant information, provide helpful guidance based on common patterns in LLM observability platforms
+
+Remember: You are helping users with Langfuse specifically, not generic questions.`;
+
+// Define the documentation search tool
+const DOCUMENTATION_SEARCH_TOOL: LLMToolDefinition = {
+  name: "search_documentation",
+  description:
+    "Search Langfuse documentation for information about features, APIs, SDKs, and how to use Langfuse. Use this tool when the user asks questions about Langfuse functionality, features, or usage.",
+  parameters: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description:
+          "The search query to find relevant documentation. Include key terms from the user's question.",
+      },
+    },
+    required: ["query"],
+  },
+};
+
 export async function sendMessageToLLM(
   params: SendMessageParams,
-): Promise<string> {
+): Promise<SendMessageResult> {
   return await instrumentAsync(
     { name: "assistant.llm.call", spanKind: SpanKind.CLIENT },
     async (span) => {
@@ -65,12 +118,27 @@ export async function sendMessageToLLM(
           config: null,
         };
 
-        // Convert conversation history to LLM format
-        const formattedMessages = params.messages.map((msg) => ({
-          type:
-            msg.sender === "user" ? ("user" as const) : ("assistant" as const),
-          content: msg.content,
-        }));
+        // Convert conversation history to LLM format with system prompt
+        const formattedMessages = [
+          // Add system prompt as first message
+          {
+            type: "system" as const,
+            role: ChatMessageRole.System,
+            content: SYSTEM_PROMPT,
+          },
+          // Then add conversation history
+          ...params.messages.map((msg) => ({
+            type:
+              msg.sender === "user"
+                ? ("user" as const)
+                : ("assistant" as const),
+            role:
+              msg.sender === "user"
+                ? ChatMessageRole.User
+                : ChatMessageRole.Assistant,
+            content: msg.content,
+          })),
+        ];
 
         // Log input for tracing
         logger.info("Sending message to LLM", {
@@ -106,13 +174,10 @@ export async function sendMessageToLLM(
           };
         }
 
-        // Call the LLM with tracing
+        // Call the LLM with tracing and tools
         const completion = await fetchLLMCompletion({
           llmConnection,
-          messages: formattedMessages.map((m) => ({
-            ...m,
-            type: ChatMessageType.PublicAPICreated,
-          })) as ChatMessage[],
+          messages: formattedMessages as ChatMessage[],
           modelParams: {
             provider: env.ASSISTANT_LLM_PROVIDER,
             model: env.ASSISTANT_LLM_MODEL,
@@ -121,9 +186,91 @@ export async function sendMessageToLLM(
           streaming: false,
           traceSinkParams,
           shouldUseLangfuseAPIKey: !!traceSinkParams,
+          tools: [DOCUMENTATION_SEARCH_TOOL],
         });
 
-        // Extract text from completion
+        // Check if response contains tool calls
+        if (
+          completion &&
+          typeof completion === "object" &&
+          "tool_calls" in completion &&
+          Array.isArray(completion.tool_calls) &&
+          completion.tool_calls.length > 0
+        ) {
+          logger.info("LLM requested tool calls", {
+            toolCallCount: completion.tool_calls.length,
+          });
+
+          // Extract tool calls
+          const toolCalls: ToolCall[] = completion.tool_calls.map((tc) => ({
+            id: tc.id,
+            name: tc.name,
+            arguments: tc.args as Record<string, unknown>,
+          }));
+
+          // Execute tool calls
+          const toolResults = await executeToolCalls(toolCalls);
+
+          // Get initial content
+          const initialContent =
+            typeof completion.content === "string"
+              ? completion.content
+              : Array.isArray(completion.content)
+                ? completion.content
+                    .filter((c: any) => c.type === "text")
+                    .map((c: any) => c.text)
+                    .join("\n")
+                : "";
+
+          // Call LLM again with tool results
+          const followUpMessages: ChatMessage[] = [
+            ...formattedMessages,
+            {
+              type: ChatMessageType.AssistantToolCall,
+              role: ChatMessageRole.Assistant,
+              content: initialContent,
+              toolCalls: completion.tool_calls,
+            },
+            ...toolResults.map(
+              (result) =>
+                ({
+                  type: ChatMessageType.ToolResult,
+                  role: ChatMessageRole.Tool,
+                  content: result.content,
+                  toolCallId: result.toolCallId,
+                }) as ChatMessage,
+            ),
+          ];
+
+          const finalCompletion = await fetchLLMCompletion({
+            llmConnection,
+            messages: followUpMessages,
+            modelParams: {
+              provider: env.ASSISTANT_LLM_PROVIDER,
+              model: env.ASSISTANT_LLM_MODEL,
+              adapter: env.ASSISTANT_LLM_ADAPTER,
+            },
+            streaming: false,
+            traceSinkParams,
+            shouldUseLangfuseAPIKey: !!traceSinkParams,
+          });
+
+          const finalText =
+            typeof finalCompletion === "string"
+              ? finalCompletion
+              : String(finalCompletion);
+
+          logger.info("Received final LLM response after tool use", {
+            responseLength: finalText.length,
+          });
+
+          return {
+            content: finalText,
+            toolCalls,
+          };
+        }
+
+        // Extract text from completion (no tool calls)
         let responseText: string;
         if (typeof completion === "string") {
           responseText = completion;
@@ -150,7 +297,7 @@ export async function sendMessageToLLM(
           responseLength: responseText.length,
         });
 
-        return responseText;
+        return { content: responseText };
       } catch (error) {
         traceException(error);
         logger.error("Failed to get LLM response", {
@@ -185,4 +332,81 @@ export async function sendMessageToLLM(
       }
     },
   );
+}
+
+/**
+ * Execute tool calls and return results
+ */
+async function executeToolCalls(
+  toolCalls: ToolCall[],
+): Promise<Array<{ toolCallId: string; content: string }>> {
+  const results: Array<{ toolCallId: string; content: string }> = [];
+
+  for (const call of toolCalls) {
+    try {
+      if (call.name === "search_documentation") {
+        const query = call.arguments.query as string;
+
+        logger.info("Executing documentation search", { query });
+
+        // Search documentation (increased to 5 for better context)
+        const searchResults = await searchDocumentation(query, 5);
+
+        // Format results
+        const formattedResults = searchResults
+          .map(
+            (result, i) =>
+              `${i + 1}. **${result.section}**\n\n${result.content.slice(0, 500)}${result.content.length > 500 ? "..." : ""}\n`,
+          )
+          .join("\n");
+
+        const resultContent =
+          searchResults.length > 0
+            ? `Found ${searchResults.length} relevant documentation sections:\n\n${formattedResults}`
+            : `No documentation found for query: "${query}"`;
+
+        results.push({
+          toolCallId: call.id,
+          content: resultContent,
+        });
+
+        logger.info("Documentation search completed", {
+          query,
+          resultCount: searchResults.length,
+        });
+      } else {
+        // Unknown tool
+        logger.warn("Unknown tool requested", { toolName: call.name });
+        results.push({
+          toolCallId: call.id,
+          content: `Error: Unknown tool "${call.name}"`,
+        });
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : "";
+
+      logger.error("Tool execution failed", {
+        toolName: call.name,
+        error: errorMessage,
+        stack: errorStack,
+      });
+
+      // Also log to console for debugging
+      console.error("❌ Tool execution error:", {
+        tool: call.name,
+        query: call.arguments,
+        error: errorMessage,
+        stack: errorStack,
+      });
+
+      results.push({
+        toolCallId: call.id,
+        content: `Error executing tool: ${errorMessage}`,
+      });
+    }
+  }
+
+  return results;
 }

@@ -1589,6 +1589,7 @@ model Conversation {
   userId    String    @map("user_id")
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   startedAt DateTime  @default(now()) @map("started_at")
+  title     String    @default("New Conversation")
   messages  Message[]
 
   @@index([userId])
@@ -1603,6 +1604,7 @@ model Message {
   sender         String       // user | assistant
   content        String       @db.Text
   timestamp      DateTime     @default(now())
+  metadata       Json?        @default("{}")
 
   @@index([conversationId])
   @@map("messages")

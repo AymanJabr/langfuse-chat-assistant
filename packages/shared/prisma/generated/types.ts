@@ -397,6 +397,7 @@ export type Conversation = {
   id: string;
   user_id: string;
   started_at: Generated<Timestamp>;
+  title: Generated<string>;
 };
 export type CronJobs = {
   name: string;
@@ -678,6 +679,7 @@ export type Message = {
   sender: string;
   content: string;
   timestamp: Generated<Timestamp>;
+  metadata: Generated<unknown | null>;
 };
 export type MixpanelIntegration = {
   project_id: string;

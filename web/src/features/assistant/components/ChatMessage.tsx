@@ -1,16 +1,38 @@
 import { Card, CardContent } from "@/src/components/ui/card";
 import { cn } from "@/src/utils/tailwind";
-import { User, Bot } from "lucide-react";
+import { User, Bot, Search } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { useState } from "react";
+import { Badge } from "@/src/components/ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/src/components/ui/collapsible";
+
+type ToolCall = {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+};
 
 type ChatMessageProps = {
   sender: "user" | "assistant";
   content: string;
   timestamp: Date;
+  metadata?: {
+    toolCalls?: ToolCall[];
+  };
 };
 
-export function ChatMessage({ sender, content, timestamp }: ChatMessageProps) {
+export function ChatMessage({
+  sender,
+  content,
+  timestamp,
+  metadata,
+}: ChatMessageProps) {
   const isUser = sender === "user";
+  const [toolCallsExpanded, setToolCallsExpanded] = useState(false);
 
   return (
     <div
@@ -39,6 +61,40 @@ export function ChatMessage({ sender, content, timestamp }: ChatMessageProps) {
             <p className="whitespace-pre-wrap text-sm">{content}</p>
           </CardContent>
         </Card>
+
+        {/* Tool calls display (only for assistant messages) */}
+        {!isUser && metadata?.toolCalls && metadata.toolCalls.length > 0 && (
+          <Collapsible
+            open={toolCallsExpanded}
+            onOpenChange={setToolCallsExpanded}
+          >
+            <CollapsibleTrigger asChild>
+              <button className="flex items-center gap-2">
+                <Badge variant="outline" className="cursor-pointer">
+                  <Search className="mr-1 h-3 w-3" />
+                  Used {metadata.toolCalls.length} tool(s)
+                </Badge>
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2 space-y-2">
+              {metadata.toolCalls.map((call, i) => (
+                <Card key={i} className="border-muted">
+                  <CardContent className="p-3 text-sm">
+                    <div className="mb-2 flex items-center gap-2">
+                      <Search className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">{call.name}</span>
+                    </div>
+                    {call.arguments.query && (
+                      <div className="text-muted-foreground">
+                        Query: &quot;{String(call.arguments.query)}&quot;
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </CollapsibleContent>
+          </Collapsible>
+        )}
 
         {/* Timestamp */}
         <span
