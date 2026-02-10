@@ -8,6 +8,7 @@ import {
   type ChatMessage,
   LangfuseInternalTraceEnvironment,
 } from "@langfuse/shared/src/server";
+import { encrypt } from "@langfuse/shared/encryption";
 import { TRPCError } from "@trpc/server";
 import { env } from "@/src/env.mjs";
 import { SpanKind } from "@opentelemetry/api";
@@ -49,10 +50,12 @@ export async function sendMessageToLLM(
         });
 
         // Build LLM connection from environment variables
+        // Note: fetchLLMCompletion expects encrypted keys (as stored in DB)
+        // so we encrypt the plaintext key from environment variable
         const llmConnection = {
           provider: env.ASSISTANT_LLM_PROVIDER,
           adapter: env.ASSISTANT_LLM_ADAPTER,
-          secretKey: env.ASSISTANT_LLM_API_KEY,
+          secretKey: encrypt(env.ASSISTANT_LLM_API_KEY),
           baseURL: env.ASSISTANT_LLM_BASE_URL ?? null,
           displaySecretKey: `***${env.ASSISTANT_LLM_API_KEY.slice(-4)}`,
           customModels: [],
@@ -150,7 +153,25 @@ export async function sendMessageToLLM(
         return responseText;
       } catch (error) {
         traceException(error);
-        logger.error("Failed to get LLM response", error);
+        logger.error("Failed to get LLM response", {
+          error,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorStack: error instanceof Error ? error.stack : undefined,
+          conversationId: params.conversationId,
+          userId: params.userId,
+        });
+
+        // Log to console for debugging
+        console.error("❌ LLM Call Failed:");
+        console.error("   Error:", error);
+        console.error(
+          "   Message:",
+          error instanceof Error ? error.message : String(error),
+        );
+        console.error(
+          "   Stack:",
+          error instanceof Error ? error.stack : "No stack",
+        );
 
         if (error instanceof TRPCError) {
           throw error;
@@ -158,7 +179,8 @@ export async function sendMessageToLLM(
 
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to get response from LLM",
+          message: `Failed to get response from LLM: ${error instanceof Error ? error.message : String(error)}`,
+          cause: error,
         });
       }
     },
