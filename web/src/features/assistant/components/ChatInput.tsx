@@ -59,12 +59,14 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
         disabled={disabled}
         className="max-h-[96px] min-h-[40px] resize-none"
         rows={1}
+        data-testid="chat-input-textarea"
       />
       <Button
         onClick={handleSend}
         disabled={disabled || !message.trim()}
         size="icon"
         className="h-10 w-10 shrink-0"
+        data-testid="chat-send-button"
       >
         <Send className="h-4 w-4" />
       </Button>

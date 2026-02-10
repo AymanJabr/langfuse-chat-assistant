@@ -103,6 +103,7 @@ export function ConversationList({
           onClick={handleNewConversation}
           disabled={createConversation.isPending}
           className="w-full"
+          data-testid="new-conversation-button"
         >
           <Plus className="mr-2 h-4 w-4" />
           New Conversation
@@ -130,6 +131,7 @@ export function ConversationList({
                     "border-primary bg-accent",
                 )}
                 onClick={() => onSelectConversation(conversation.id)}
+                data-testid={`conversation-item-${conversation.id}`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1 space-y-1">
@@ -171,7 +173,10 @@ export function ConversationList({
                     ) : (
                       <div className="flex items-center gap-2">
                         <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <span className="truncate text-sm font-medium">
+                        <span
+                          className="truncate text-sm font-medium"
+                          data-testid="conversation-title"
+                        >
                           {conversation.title}
                         </span>
                         <Button

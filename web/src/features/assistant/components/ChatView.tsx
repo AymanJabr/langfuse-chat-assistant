@@ -107,7 +107,10 @@ export function ChatView({ conversationId, projectId }: ChatViewProps) {
   // Empty state - no conversation selected
   if (!conversationId) {
     return (
-      <div className="flex h-full flex-col items-center justify-center space-y-4 text-muted-foreground">
+      <div
+        className="flex h-full flex-col items-center justify-center space-y-4 text-muted-foreground"
+        data-testid="empty-state-no-conversation"
+      >
         <MessageSquare className="h-16 w-16 opacity-20" />
         <div className="text-center">
           <p className="text-lg font-medium">No conversation selected</p>
@@ -134,7 +137,11 @@ export function ChatView({ conversationId, projectId }: ChatViewProps) {
   return (
     <div className="flex h-full flex-col">
       {/* Messages Area */}
-      <ScrollArea ref={scrollAreaRef} className="flex-1 p-4">
+      <ScrollArea
+        ref={scrollAreaRef}
+        className="flex-1 p-4"
+        data-testid="chat-messages-container"
+      >
         <div className="space-y-4">
           {conversation?.messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center space-y-2 py-12 text-center text-muted-foreground">

@@ -40,6 +40,7 @@ export function ChatMessage({
         "flex w-full gap-3",
         isUser ? "justify-end" : "justify-start",
       )}
+      data-testid={`chat-message-${sender}`}
     >
       {/* Avatar for assistant (left side) */}
       {!isUser && (
@@ -70,7 +71,11 @@ export function ChatMessage({
           >
             <CollapsibleTrigger asChild>
               <button className="flex items-center gap-2">
-                <Badge variant="outline" className="cursor-pointer">
+                <Badge
+                  variant="outline"
+                  className="cursor-pointer"
+                  data-testid="tool-calls-badge"
+                >
                   <Search className="mr-1 h-3 w-3" />
                   Used {metadata.toolCalls.length} tool(s)
                 </Badge>
@@ -78,7 +83,11 @@ export function ChatMessage({
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-2 space-y-2">
               {metadata.toolCalls.map((call, i) => (
-                <Card key={i} className="border-muted">
+                <Card
+                  key={i}
+                  className="border-muted"
+                  data-testid="tool-call-item"
+                >
                   <CardContent className="p-3 text-sm">
                     <div className="mb-2 flex items-center gap-2">
                       <Search className="h-4 w-4 text-muted-foreground" />
