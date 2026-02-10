@@ -5,6 +5,7 @@ import {
 import { TRPCError } from "@trpc/server";
 import { z } from "zod/v4";
 import { sendMessageToLLM } from "./service";
+import { logger } from "@langfuse/shared/src/server";
 
 export const assistantRouter = createTRPCRouter({
   // List all conversations for a user
@@ -91,6 +92,12 @@ export const assistantRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      logger.info("Assistant: Processing message", {
+        conversationId: input.conversationId,
+        userId: ctx.session.user.id,
+        contentLength: input.content.length,
+      });
+
       // Verify conversation belongs to user
       const conversation = await ctx.prisma.conversation.findUnique({
         where: {
@@ -100,6 +107,10 @@ export const assistantRouter = createTRPCRouter({
       });
 
       if (!conversation) {
+        logger.warn("Assistant: Conversation not found", {
+          conversationId: input.conversationId,
+          userId: ctx.session.user.id,
+        });
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Conversation not found",
@@ -113,6 +124,11 @@ export const assistantRouter = createTRPCRouter({
           sender: "user",
           content: input.content,
         },
+      });
+
+      logger.info("Assistant: Stored user message", {
+        messageId: userMessage.id,
+        conversationId: input.conversationId,
       });
 
       // Get conversation history for context
@@ -132,6 +148,8 @@ export const assistantRouter = createTRPCRouter({
       // Call LLM
       const assistantResponse = await sendMessageToLLM({
         messages: messageHistory,
+        conversationId: input.conversationId,
+        userId: ctx.session.user.id,
       });
 
       // Store assistant message
@@ -141,6 +159,12 @@ export const assistantRouter = createTRPCRouter({
           sender: "assistant",
           content: assistantResponse,
         },
+      });
+
+      logger.info("Assistant: Stored assistant response", {
+        messageId: assistantMessage.id,
+        conversationId: input.conversationId,
+        responseLength: assistantResponse.length,
       });
 
       return {

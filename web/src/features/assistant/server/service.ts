@@ -2,9 +2,17 @@ import {
   fetchLLMCompletion,
   logger,
   traceException,
+  instrumentAsync,
+  type TraceSinkParams,
+  ChatMessageType,
+  type ChatMessage,
+  LangfuseInternalTraceEnvironment,
 } from "@langfuse/shared/src/server";
 import { TRPCError } from "@trpc/server";
 import { env } from "@/src/env.mjs";
+import { SpanKind } from "@opentelemetry/api";
+import { randomBytes } from "crypto";
+import { getLangfuseClient } from "./utils";
 
 interface Message {
   sender: string;
@@ -13,83 +21,146 @@ interface Message {
 
 interface SendMessageParams {
   messages: Message[];
+  conversationId: string;
+  userId: string;
 }
 
 export async function sendMessageToLLM(
   params: SendMessageParams,
 ): Promise<string> {
-  try {
-    // Check if assistant LLM is configured
-    if (!env.ASSISTANT_LLM_API_KEY) {
-      throw new TRPCError({
-        code: "PRECONDITION_FAILED",
-        message:
-          "Assistant LLM is not configured. Please set ASSISTANT_LLM_API_KEY in environment variables.",
-      });
-    }
+  return await instrumentAsync(
+    { name: "assistant.llm.call", spanKind: SpanKind.CLIENT },
+    async (span) => {
+      try {
+        // Check if assistant LLM is configured
+        if (!env.ASSISTANT_LLM_API_KEY) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message:
+              "Assistant LLM is not configured. Please set ASSISTANT_LLM_API_KEY in environment variables.",
+          });
+        }
 
-    // Build LLM connection from environment variables
-    const llmConnection = {
-      provider: env.ASSISTANT_LLM_PROVIDER,
-      adapter: env.ASSISTANT_LLM_ADAPTER,
-      secretKey: env.ASSISTANT_LLM_API_KEY,
-      baseURL: env.ASSISTANT_LLM_BASE_URL ?? null,
-      displaySecretKey: `***${env.ASSISTANT_LLM_API_KEY.slice(-4)}`,
-      customModels: [],
-      withDefaultModels: true,
-      extraHeaders: null,
-      extraHeaderKeys: [],
-      config: null,
-    };
+        // Set span attributes for observability
+        span.setAttributes({
+          "llm.provider": env.ASSISTANT_LLM_PROVIDER,
+          "llm.model": env.ASSISTANT_LLM_MODEL,
+          "llm.message_count": params.messages.length,
+        });
 
-    // Convert conversation history to LLM format
-    const formattedMessages = params.messages.map((msg) => ({
-      type: msg.sender === "user" ? ("user" as const) : ("assistant" as const),
-      content: msg.content,
-    }));
+        // Build LLM connection from environment variables
+        const llmConnection = {
+          provider: env.ASSISTANT_LLM_PROVIDER,
+          adapter: env.ASSISTANT_LLM_ADAPTER,
+          secretKey: env.ASSISTANT_LLM_API_KEY,
+          baseURL: env.ASSISTANT_LLM_BASE_URL ?? null,
+          displaySecretKey: `***${env.ASSISTANT_LLM_API_KEY.slice(-4)}`,
+          customModels: [],
+          withDefaultModels: true,
+          extraHeaders: null,
+          extraHeaderKeys: [],
+          config: null,
+        };
 
-    // Call the LLM
-    const completion = await fetchLLMCompletion({
-      llmConnection,
-      messages: formattedMessages,
-      modelParams: {
-        provider: env.ASSISTANT_LLM_PROVIDER,
-        model: env.ASSISTANT_LLM_MODEL,
-        adapter: env.ASSISTANT_LLM_ADAPTER,
-      },
-      streaming: false,
-    });
+        // Convert conversation history to LLM format
+        const formattedMessages = params.messages.map((msg) => ({
+          type:
+            msg.sender === "user" ? ("user" as const) : ("assistant" as const),
+          content: msg.content,
+        }));
 
-    // Extract text from completion
-    if (typeof completion === "string") {
-      return completion;
-    }
+        // Log input for tracing
+        logger.info("Sending message to LLM", {
+          provider: env.ASSISTANT_LLM_PROVIDER,
+          model: env.ASSISTANT_LLM_MODEL,
+          messageCount: params.messages.length,
+        });
 
-    // Handle object response
-    if (
-      completion &&
-      typeof completion === "object" &&
-      "content" in completion
-    ) {
-      return String(completion.content);
-    }
+        // Set up Langfuse tracing if configured
+        let traceSinkParams: TraceSinkParams | undefined;
+        if (
+          env.LANGFUSE_AI_FEATURES_PUBLIC_KEY &&
+          env.LANGFUSE_AI_FEATURES_SECRET_KEY &&
+          env.LANGFUSE_AI_FEATURES_PROJECT_ID
+        ) {
+          // Initialize Langfuse client for tracing
+          getLangfuseClient(
+            env.LANGFUSE_AI_FEATURES_PUBLIC_KEY,
+            env.LANGFUSE_AI_FEATURES_SECRET_KEY,
+            env.LANGFUSE_AI_FEATURES_HOST,
+          );
 
-    logger.error("Unexpected LLM response format", { completion });
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Unexpected response format from LLM",
-    });
-  } catch (error) {
-    traceException(error);
-    logger.error("Failed to get LLM response", error);
+          traceSinkParams = {
+            environment: LangfuseInternalTraceEnvironment.ChatAssistant,
+            traceName: "chat-assistant",
+            traceId: randomBytes(16).toString("hex"),
+            targetProjectId: env.LANGFUSE_AI_FEATURES_PROJECT_ID,
+            userId: params.userId,
+            metadata: {
+              conversationId: params.conversationId,
+              messageCount: params.messages.length,
+            },
+          };
+        }
 
-    if (error instanceof TRPCError) {
-      throw error;
-    }
+        // Call the LLM with tracing
+        const completion = await fetchLLMCompletion({
+          llmConnection,
+          messages: formattedMessages.map((m) => ({
+            ...m,
+            type: ChatMessageType.PublicAPICreated,
+          })) as ChatMessage[],
+          modelParams: {
+            provider: env.ASSISTANT_LLM_PROVIDER,
+            model: env.ASSISTANT_LLM_MODEL,
+            adapter: env.ASSISTANT_LLM_ADAPTER,
+          },
+          streaming: false,
+          traceSinkParams,
+          shouldUseLangfuseAPIKey: !!traceSinkParams,
+        });
 
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Failed to get response from LLM",
-    });
-  }
+        // Extract text from completion
+        let responseText: string;
+        if (typeof completion === "string") {
+          responseText = completion;
+        } else if (
+          completion &&
+          typeof completion === "object" &&
+          "content" in completion
+        ) {
+          responseText = String(completion.content);
+        } else {
+          logger.error("Unexpected LLM response format", { completion });
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Unexpected response format from LLM",
+          });
+        }
+
+        // Log output for tracing
+        span.setAttributes({
+          "llm.response_length": responseText.length,
+        });
+
+        logger.info("Received LLM response", {
+          responseLength: responseText.length,
+        });
+
+        return responseText;
+      } catch (error) {
+        traceException(error);
+        logger.error("Failed to get LLM response", error);
+
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to get response from LLM",
+        });
+      }
+    },
+  );
 }

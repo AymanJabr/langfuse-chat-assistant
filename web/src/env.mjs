@@ -593,6 +593,12 @@ export const env = createEnv({
     // Email
     EMAIL_FROM_ADDRESS: process.env.EMAIL_FROM_ADDRESS,
     SMTP_CONNECTION_URL: process.env.SMTP_CONNECTION_URL,
+    // Assistant - LLM Configuration for the chat assistant
+    ASSISTANT_LLM_API_KEY: process.env.ASSISTANT_LLM_API_KEY,
+    ASSISTANT_LLM_PROVIDER: process.env.ASSISTANT_LLM_PROVIDER,
+    ASSISTANT_LLM_MODEL: process.env.ASSISTANT_LLM_MODEL,
+    ASSISTANT_LLM_ADAPTER: process.env.ASSISTANT_LLM_ADAPTER,
+    ASSISTANT_LLM_BASE_URL: process.env.ASSISTANT_LLM_BASE_URL,
     // Otel
     OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
     OTEL_SERVICE_NAME: process.env.OTEL_SERVICE_NAME,
