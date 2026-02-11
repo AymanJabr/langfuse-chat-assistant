@@ -221,7 +221,6 @@ export const env = createEnv({
     ASSISTANT_LLM_PROVIDER: z.string().default("openai"),
     ASSISTANT_LLM_MODEL: z.string().default("gpt-4"),
     ASSISTANT_LLM_ADAPTER: z.string().default("openai"),
-    ASSISTANT_LLM_BASE_URL: z.string().url().optional(),
 
     // Otel
     OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://localhost:4318"),
@@ -606,7 +605,6 @@ export const env = createEnv({
     ASSISTANT_LLM_PROVIDER: process.env.ASSISTANT_LLM_PROVIDER,
     ASSISTANT_LLM_MODEL: process.env.ASSISTANT_LLM_MODEL,
     ASSISTANT_LLM_ADAPTER: process.env.ASSISTANT_LLM_ADAPTER,
-    ASSISTANT_LLM_BASE_URL: process.env.ASSISTANT_LLM_BASE_URL,
     // Otel
     OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
     OTEL_SERVICE_NAME: process.env.OTEL_SERVICE_NAME,

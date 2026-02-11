@@ -251,6 +251,18 @@ Support Channels:
 - [Report a Bug](https://github.com/langfuse/langfuse/issues) on GitHub Issues.
 - For time-sensitive queries, ping us via the in-app chat widget.
 
+### AI Assistant
+
+Interactive ChatGPT-style assistant to help users understand and use Langfuse. The assistant provides contextual help by searching Langfuse documentation and answering questions about features, APIs, and workflows.
+
+**Documentation:** See [ASSISTANT_FEATURE.md](./ASSISTANT_FEATURE.md) for complete implementation details including:
+- Architecture and design decisions (tRPC API, user-scoped conversations, tool calling)
+- Database schema and migrations
+- API endpoints and usage examples
+- Frontend components and features
+- Environment configuration
+- Setup and testing instructions
+
 ## 🤝 Contributing
 
 Your contributions are welcome!
