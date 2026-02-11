@@ -18,6 +18,7 @@ import {
   SquarePercent,
   ClipboardPen,
   Clock,
+  MessageSquare,
 } from "lucide-react";
 import { type ReactNode } from "react";
 import { type Entitlement } from "@/src/features/entitlements/constants/entitlements";
@@ -168,6 +169,12 @@ export const ROUTES: Route[] = [
     icon: Database,
     productModule: "datasets",
     group: RouteGroup.Evaluation,
+    section: RouteSection.Main,
+  },
+  {
+    title: "Assistant",
+    pathname: `/project/[projectId]/assistant`,
+    icon: MessageSquare,
     section: RouteSection.Main,
   },
   {

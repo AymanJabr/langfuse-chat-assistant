@@ -85,6 +85,7 @@ model User {
   surveys                   Survey[]
   commentReactions          CommentReaction[]
   notificationPreferences   NotificationPreference[]
+  conversations             Conversation[]
 
   @@map("users")
 }
@@ -1581,4 +1582,31 @@ model CloudSpendAlert {
 
   @@index([orgId])
   @@map("cloud_spend_alerts")
+}
+
+// AI Assistant Chat conversations
+model Conversation {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startedAt DateTime  @default(now()) @map("started_at")
+  title     String    @default("New Conversation")
+  messages  Message[]
+
+  @@index([userId])
+  @@map("conversations")
+}
+
+// AI Assistant Chat messages
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String       @map("conversation_id")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         String       // user | assistant
+  content        String       @db.Text
+  timestamp      DateTime     @default(now())
+  metadata       Json?        @default("{}")
+
+  @@index([conversationId])
+  @@map("messages")
 }
